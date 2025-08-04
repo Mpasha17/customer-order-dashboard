@@ -135,6 +135,7 @@ def get_customers():
         # Get pagination parameters
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
+        search = request.args.get('search', '')
         
         # Validate pagination parameters
         if page < 1 or per_page < 1 or per_page > 100:
@@ -148,24 +149,48 @@ def get_customers():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Build query based on search parameter
+        query_conditions = []
+        query_params = []
+        
+        if search:
+            search_term = f'%{search}%'
+            query_conditions.append('''
+                (u.first_name LIKE ? OR 
+                u.last_name LIKE ? OR 
+                u.email LIKE ? OR
+                (u.first_name || ' ' || u.last_name) LIKE ?)
+            ''')
+            query_params.extend([search_term, search_term, search_term, search_term])
+        
+        # Construct the base query
+        count_query = 'SELECT COUNT(*) FROM users u'
+        data_query = '''
+            SELECT u.*, COUNT(o.id) as order_count 
+            FROM users u 
+            LEFT JOIN order_items o ON u.id = o.user_id
+        '''
+        
+        # Add WHERE clause if there are conditions
+        if query_conditions:
+            where_clause = ' WHERE ' + ' AND '.join(query_conditions)
+            count_query += where_clause
+            data_query += where_clause
+        
+        # Complete the data query
+        data_query += ' GROUP BY u.id ORDER BY u.id LIMIT ? OFFSET ?'
+        query_params.extend([per_page, offset])
+        
         # Get total count for pagination metadata
-        cursor.execute('SELECT COUNT(*) FROM users')
+        cursor.execute(count_query, query_params[:-2] if query_params else [])
         total_customers = cursor.fetchone()[0]
         
         # Get customers with pagination
-        cursor.execute('''
-            SELECT u.*, COUNT(o.id) as order_count 
-            FROM users u 
-            LEFT JOIN order_items o ON u.id = o.user_id 
-            GROUP BY u.id 
-            ORDER BY u.id 
-            LIMIT ? OFFSET ?
-        ''', (per_page, offset))
-        
+        cursor.execute(data_query, query_params)
         customers = [dict(row) for row in cursor.fetchall()]
         
         # Calculate pagination metadata
-        total_pages = (total_customers + per_page - 1) // per_page  # Ceiling division
+        total_pages = (total_customers + per_page - 1) // per_page if total_customers > 0 else 1  # Ceiling division
         
         conn.close()
         

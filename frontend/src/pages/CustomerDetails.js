@@ -12,14 +12,13 @@ const CustomerDetails = () => {
   useEffect(() => {
     const fetchCustomerData = async () => {
       try {
-        // Fetch customer details
-        const customerResponse = await axios.get(`/api/users`);
-        const customerData = customerResponse.data.find(user => user.user_id === parseInt(id));
-        setCustomer(customerData);
+        // Fetch customer details with order statistics
+        const customerResponse = await axios.get(`/api/customers/${id}`);
+        setCustomer(customerResponse.data);
 
         // Fetch customer orders
-        const ordersResponse = await axios.get(`/api/users/${id}/orders`);
-        setOrders(ordersResponse.data);
+        const ordersResponse = await axios.get(`/api/customers/${id}/orders`);
+        setOrders(ordersResponse.data.orders || []);
         
         setLoading(false);
       } catch (error) {
@@ -77,12 +76,42 @@ const CustomerDetails = () => {
                 <Col md={6}>
                   <p><strong>Name:</strong> {customer.first_name} {customer.last_name}</p>
                   <p><strong>Email:</strong> {customer.email}</p>
-                  <p><strong>Phone:</strong> {customer.phone}</p>
+                  <p><strong>Age:</strong> {customer.age}</p>
+                  <p><strong>Gender:</strong> {customer.gender}</p>
                 </Col>
                 <Col md={6}>
-                  <p><strong>Address:</strong> {customer.address}</p>
-                  <p><strong>City:</strong> {customer.city}, {customer.state} {customer.zip_code}</p>
-                  <p><strong>Registration Date:</strong> {customer.registration_date}</p>
+                  <p><strong>Address:</strong> {customer.street_address}</p>
+                  <p><strong>Location:</strong> {customer.city}, {customer.state} {customer.postal_code}</p>
+                  <p><strong>Country:</strong> {customer.country}</p>
+                  <p><strong>Joined:</strong> {new Date(customer.created_at).toLocaleDateString()}</p>
+                </Col>
+              </Row>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+      
+      <Row className="mb-4">
+        <Col>
+          <Card>
+            <Card.Body>
+              <Card.Title>Order Statistics</Card.Title>
+              <Row>
+                <Col xs={6} md={3} className="text-center mb-3">
+                  <h3>{customer.order_statistics?.total_orders || 0}</h3>
+                  <p>Total Orders</p>
+                </Col>
+                <Col xs={6} md={3} className="text-center mb-3">
+                  <h3>{customer.order_statistics?.completed_orders || 0}</h3>
+                  <p>Completed</p>
+                </Col>
+                <Col xs={6} md={3} className="text-center mb-3">
+                  <h3>{customer.order_statistics?.shipped_orders || 0}</h3>
+                  <p>Shipped</p>
+                </Col>
+                <Col xs={6} md={3} className="text-center mb-3">
+                  <h3>${customer.order_statistics?.total_spent?.toFixed(2) || '0.00'}</h3>
+                  <p>Total Spent</p>
                 </Col>
               </Row>
             </Card.Body>
@@ -98,44 +127,59 @@ const CustomerDetails = () => {
               {orders.length === 0 ? (
                 <p>This customer has no orders.</p>
               ) : (
-                <Table striped bordered hover responsive>
-                  <thead>
-                    <tr>
-                      <th>Order ID</th>
-                      <th>Date</th>
-                      <th>Product</th>
-                      <th>Category</th>
-                      <th>Quantity</th>
-                      <th>Price</th>
-                      <th>Total</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map((order) => (
-                      <tr key={order.order_id}>
-                        <td>{order.order_id}</td>
-                        <td>{order.order_date}</td>
-                        <td>{order.product_name}</td>
-                        <td>{order.product_category}</td>
-                        <td>{order.quantity}</td>
-                        <td>${parseFloat(order.price).toFixed(2)}</td>
-                        <td>${parseFloat(order.total_amount).toFixed(2)}</td>
-                        <td>{getStatusBadge(order.status)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colSpan="6" className="text-end"><strong>Total Spent:</strong></td>
-                      <td colSpan="2">
-                        <strong>
-                          ${orders.reduce((total, order) => total + parseFloat(order.total_amount), 0).toFixed(2)}
-                        </strong>
-                      </td>
-                    </tr>
-                  </tfoot>
-                </Table>
+                <div>
+                  {orders.map((order) => (
+                    <Card key={order.order_id} className="mb-3">
+                      <Card.Header>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <div>
+                            <strong>Order #{order.order_id}</strong> - {new Date(order.created_at).toLocaleDateString()}
+                          </div>
+                          <div>
+                            {getStatusBadge(order.status)}
+                          </div>
+                        </div>
+                      </Card.Header>
+                      <Card.Body>
+                        <Row className="mb-2">
+                          <Col xs={6} md={3}>
+                            <small className="text-muted">Items</small>
+                            <p className="mb-0">{order.items_count}</p>
+                          </Col>
+                          <Col xs={6} md={3}>
+                            <small className="text-muted">Total</small>
+                            <p className="mb-0">${parseFloat(order.order_total).toFixed(2)}</p>
+                          </Col>
+                        </Row>
+                        
+                        {order.items && order.items.length > 0 && (
+                          <>
+                            <hr />
+                            <h6>Order Items</h6>
+                            <Table responsive size="sm">
+                              <thead>
+                                <tr>
+                                  <th>Item ID</th>
+                                  <th>Price</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {order.items.map((item) => (
+                                  <tr key={item.id}>
+                                    <td>{item.id}</td>
+                                    <td>${parseFloat(item.sale_price).toFixed(2)}</td>
+                                    <td>{getStatusBadge(item.status)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </Table>
+                          </>
+                        )}
+                      </Card.Body>
+                    </Card>
+                  ))}
+                </div>
               )}
             </Card.Body>
           </Card>
