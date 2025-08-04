@@ -8,6 +8,7 @@ A web application for managing customer orders with a React frontend and Flask b
 - `/data/` - Contains CSV files with customer and order data
 - `/frontend/` - React frontend application
 - `/database.db` - SQLite database (created when the app runs)
+- `/.gitignore` - Specifies files to exclude from version control
 
 ## Setup Instructions
 
@@ -49,3 +50,107 @@ A web application for managing customer orders with a React frontend and Flask b
 - View detailed information for each customer
 - View order history for each customer
 - See order status and total spending per customer
+
+## API Documentation
+
+### Customer Endpoints
+
+#### List Customers
+```
+GET /api/customers?page=1&per_page=10
+```
+Returns a paginated list of customers with their order counts.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `per_page` (optional): Number of customers per page (default: 10, max: 100)
+
+**Response:**
+```json
+{
+  "customers": [...],
+  "pagination": {
+    "total_customers": 100000,
+    "total_pages": 10000,
+    "current_page": 1,
+    "per_page": 10,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
+
+#### Get Customer Details
+```
+GET /api/customers/{customer_id}
+```
+Returns detailed information about a specific customer, including order statistics.
+
+**Response:**
+```json
+{
+  "id": 3,
+  "first_name": "Clifford",
+  "last_name": "Guzman",
+  ...,
+  "order_statistics": {
+    "total_orders": 5,
+    "completed_orders": 2,
+    "shipped_orders": 1,
+    "cancelled_orders": 0,
+    "total_spent": 402.20
+  }
+}
+```
+
+#### Get Customer Orders
+```
+GET /api/customers/{customer_id}/orders?page=1&per_page=10
+```
+Returns a paginated list of orders for a specific customer.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `per_page` (optional): Number of orders per page (default: 10, max: 100)
+
+**Response:**
+```json
+{
+  "orders": [...],
+  "pagination": {
+    "total_orders": 5,
+    "total_pages": 1,
+    "current_page": 1,
+    "per_page": 10,
+    "has_next": false,
+    "has_prev": false
+  }
+}
+```
+
+### Order Endpoints
+
+#### List Orders
+```
+GET /api/orders?page=1&per_page=10
+```
+Returns a paginated list of all orders with customer information.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `per_page` (optional): Number of orders per page (default: 10, max: 100)
+
+**Response:**
+```json
+{
+  "orders": [...],
+  "pagination": {
+    "total_orders": 181759,
+    "total_pages": 18176,
+    "current_page": 1,
+    "per_page": 10,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
