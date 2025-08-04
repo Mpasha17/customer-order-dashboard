@@ -236,6 +236,57 @@ def get_orders():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/orders/<int:order_id>', methods=['GET'])
+def get_order_details(order_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get order details with customer information
+        cursor.execute('''
+            SELECT o.*, 
+                   u.id as customer_id, 
+                   u.first_name, 
+                   u.last_name, 
+                   u.email,
+                   u.city,
+                   u.state,
+                   u.country
+            FROM order_items o 
+            JOIN users u ON o.user_id = u.id 
+            WHERE o.id = ?
+        ''', (order_id,))
+        
+        order = cursor.fetchone()
+        
+        if not order:
+            conn.close()
+            return jsonify({'error': 'Order not found'}), 404
+        
+        order_dict = dict(order)
+        
+        # Get other items in the same order (if any)
+        cursor.execute('''
+            SELECT id, product_id, status, sale_price 
+            FROM order_items 
+            WHERE order_id = ? AND id != ?
+            ORDER BY id
+        ''', (order_dict['order_id'], order_id))
+        
+        related_items = [dict(row) for row in cursor.fetchall()]
+        
+        if related_items:
+            order_dict['related_items'] = related_items
+            order_dict['total_items_in_order'] = len(related_items) + 1
+        else:
+            order_dict['related_items'] = []
+            order_dict['total_items_in_order'] = 1
+        
+        conn.close()
+        return jsonify(order_dict)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/customers/<int:customer_id>', methods=['GET'])
 def get_customer_details(customer_id):
     try:
@@ -308,27 +359,72 @@ def get_customer_orders(customer_id):
         cursor = conn.cursor()
         
         # Check if customer exists
-        cursor.execute('SELECT id FROM users WHERE id = ?', (customer_id,))
+        cursor.execute('SELECT id, first_name, last_name, email FROM users WHERE id = ?', (customer_id,))
         customer = cursor.fetchone()
         
         if not customer:
             conn.close()
             return jsonify({'error': 'Customer not found'}), 404
         
+        customer_info = dict(customer)
+        
         # Get total count for pagination metadata
         cursor.execute('SELECT COUNT(*) FROM order_items WHERE user_id = ?', (customer_id,))
         total_orders = cursor.fetchone()[0]
         
-        # Get customer orders with pagination
+        if total_orders == 0:
+            conn.close()
+            return jsonify({
+                'customer': customer_info,
+                'orders': [],
+                'pagination': {
+                    'total_orders': 0,
+                    'total_pages': 1,
+                    'current_page': 1,
+                    'per_page': per_page,
+                    'has_next': False,
+                    'has_prev': False
+                }
+            })
+        
+        # Get unique order_ids for this customer
         cursor.execute('''
-            SELECT o.* 
-            FROM order_items o 
-            WHERE o.user_id = ? 
-            ORDER BY o.created_at DESC 
+            SELECT DISTINCT order_id 
+            FROM order_items 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC 
             LIMIT ? OFFSET ?
         ''', (customer_id, per_page, offset))
         
-        orders = [dict(row) for row in cursor.fetchall()]
+        order_ids = [row['order_id'] for row in cursor.fetchall()]
+        
+        # Get all order items for these order_ids
+        orders_by_id = {}
+        for order_id in order_ids:
+            cursor.execute('''
+                SELECT o.*, 
+                       COUNT(*) OVER (PARTITION BY o.order_id) as items_count,
+                       SUM(o.sale_price) OVER (PARTITION BY o.order_id) as order_total
+                FROM order_items o 
+                WHERE o.order_id = ? AND o.user_id = ?
+                ORDER BY o.id
+            ''', (order_id, customer_id))
+            
+            items = [dict(row) for row in cursor.fetchall()]
+            if items:
+                # Group items by order_id
+                first_item = items[0]
+                orders_by_id[order_id] = {
+                    'order_id': order_id,
+                    'created_at': first_item['created_at'],
+                    'status': first_item['status'],  # Using status from first item
+                    'items_count': first_item['items_count'],
+                    'order_total': first_item['order_total'],
+                    'items': items
+                }
+        
+        # Convert to list for response
+        orders_list = list(orders_by_id.values())
         
         # Calculate pagination metadata
         total_pages = (total_orders + per_page - 1) // per_page if total_orders > 0 else 1
@@ -336,7 +432,8 @@ def get_customer_orders(customer_id):
         conn.close()
         
         return jsonify({
-            'orders': orders,
+            'customer': customer_info,
+            'orders': orders_list,
             'pagination': {
                 'total_orders': total_orders,
                 'total_pages': total_pages,
@@ -346,6 +443,68 @@ def get_customer_orders(customer_id):
                 'has_prev': page > 1
             }
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/orders/by-order-id/<int:order_id>', methods=['GET'])
+def get_order_by_order_id(order_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if order exists
+        cursor.execute('SELECT COUNT(*) FROM order_items WHERE order_id = ?', (order_id,))
+        order_count = cursor.fetchone()[0]
+        
+        if order_count == 0:
+            conn.close()
+            return jsonify({'error': 'Order not found'}), 404
+        
+        # Get all items in this order with customer information
+        cursor.execute('''
+            SELECT o.*, 
+                   u.id as customer_id, 
+                   u.first_name, 
+                   u.last_name, 
+                   u.email,
+                   u.city,
+                   u.state,
+                   u.country
+            FROM order_items o 
+            JOIN users u ON o.user_id = u.id 
+            WHERE o.order_id = ?
+            ORDER BY o.id
+        ''', (order_id,))
+        
+        items = [dict(row) for row in cursor.fetchall()]
+        
+        # Calculate order totals
+        total_amount = sum(item['sale_price'] for item in items)
+        
+        # Get customer info from first item
+        customer_info = {
+            'customer_id': items[0]['customer_id'],
+            'first_name': items[0]['first_name'],
+            'last_name': items[0]['last_name'],
+            'email': items[0]['email'],
+            'city': items[0]['city'],
+            'state': items[0]['state'],
+            'country': items[0]['country']
+        }
+        
+        # Create order summary
+        order_summary = {
+            'order_id': order_id,
+            'created_at': items[0]['created_at'],  # Using date from first item
+            'status': items[0]['status'],  # Using status from first item
+            'total_items': len(items),
+            'total_amount': total_amount,
+            'customer': customer_info,
+            'items': items
+        }
+        
+        conn.close()
+        return jsonify(order_summary)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
